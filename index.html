@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StrikeTrail — ATR Trailing Stop Scanner</title>
+<style>
+:root{
+    --bg:#f4f6f8;--white:#ffffff;--header-left:#1a2a4a;--header-right:#2a4a7a;
+    --text-dark:#1a1a2e;--text-medium:#555;--text-light:#888;--text-muted:#aaa;
+    --border:#e0e4e8;--border-light:#eef1f4;--shadow:0 2px 8px rgba(0,0,0,0.08);
+    --green:#22c55e;--green-bg:#ecfdf5;--green-dark:#16a34a;
+    --red:#ef4444;--red-bg:#fef2f2;--red-dark:#dc2626;
+    --blue:#3b82f6;--purple:#8b5cf6;--orange:#f59e0b;--teal:#14b8a6;
+    --radius:10px;--radius-sm:6px;--radius-pill:20px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;background:var(--bg);color:var(--text-dark);min-height:100vh;}
+
+.header{background:linear-gradient(135deg,var(--header-left),var(--header-right));padding:16px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+.header-left h1{font-size:20px;color:#fff;font-weight:700;display:flex;align-items:center;gap:8px;}
+.header-left .subtitle{font-size:11px;color:rgba(255,255,255,0.6);margin-top:3px;}
+.header-right{display:flex;gap:6px;flex-wrap:wrap;}
+.hb{padding:8px 14px;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;border:none;transition:all 0.2s;}
+.hb-scan{background:linear-gradient(135deg,var(--green),var(--teal));color:#fff;}
+.hb-scan:hover{opacity:0.9;}
+.hb-scan:disabled{opacity:0.5;cursor:not-allowed;}
+.hb-history{background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);}
+.hb-history:hover{background:rgba(255,255,255,0.25);}
+.hb-token{background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.8);border:1px solid rgba(255,255,255,0.2);}
+.hb-token:hover{background:rgba(255,255,255,0.2);}
+
+.status-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;background:var(--white);border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;}
+.status-left{display:flex;align-items:center;gap:12px;}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#888;}
+.status-dot.active{background:var(--green);box-shadow:0 0 6px var(--green);}
+.status-dot.closed{background:var(--orange);}
+.status-dot.error{background:var(--red);}
+.status-text{font-size:12px;color:var(--text-medium);}
+.status-right{display:flex;gap:15px;font-size:11px;color:var(--text-light);}
+.status-right span{display:flex;align-items:center;gap:4px;}
+
+.filters{padding:10px 24px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--white);border-bottom:1px solid var(--border);}
+.f-btn{padding:6px 14px;border-radius:var(--radius-pill);font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--white);color:var(--text-medium);transition:all 0.2s;}
+.f-btn:hover{border-color:var(--blue);color:var(--blue);}
+.f-btn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:15px;padding:15px 24px;}
+@media(max-width:768px){.panels{grid-template-columns:1fr;}}
+
+.panel{background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;}
+.panel-header{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-light);}
+.panel-header.buy{background:linear-gradient(135deg,#ecfdf5,#d1fae5);}
+.panel-header.sell{background:linear-gradient(135deg,#fef2f2,#fecaca);}
+.panel-title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;}
+.panel-title.buy-title{color:var(--green-dark);}
+.panel-title.sell-title{color:var(--red-dark);}
+.panel-count{font-size:20px;font-weight:800;}
+.panel-count.buy-count{color:var(--green-dark);}
+.panel-count.sell-count{color:var(--red-dark);}
+.panel-body{padding:10px;max-height:600px;overflow-y:auto;}
+
+.card{background:var(--bg);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;border-left:4px solid var(--border);}
+.card.buy-card{border-left-color:var(--green);}
+.card.sell-card{border-left-color:var(--red);}
+.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.card-symbol{font-size:14px;font-weight:700;}
+.card-badge{padding:3px 8px;border-radius:var(--radius-pill);font-size:10px;font-weight:700;color:#fff;}
+.card-badge.buy-badge{background:var(--green);}
+.card-badge.sell-badge{background:var(--red);}
+.card-model{font-size:10px;color:var(--text-muted);margin-top:2px;}
+.card-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;}
+.card-item{text-align:center;}
+.card-item .label{font-size:9px;color:var(--text-muted);text-transform:uppercase;}
+.card-item .value{font-size:13px;font-weight:600;margin-top:2px;}
+.card-item .value.green{color:var(--green-dark);}
+.card-item .value.red{color:var(--red-dark);}
+.card-item .value.blue{color:var(--blue);}
+.card-item .value.orange{color:var(--orange);}
+.card-item .value.purple{color:var(--purple);}
+.card-bottom{display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border-light);}
+.card-grade{padding:2px 8px;border-radius:var(--radius-pill);font-size:10px;font-weight:700;}
+.card-grade.grade-aplus{background:#dcfce7;color:#15803d;}
+.card-grade.grade-a{background:#d1fae5;color:#16a34a;}
+.card-grade.grade-b{background:#fef3c7;color:#d97706;}
+.card-grade.grade-c{background:#fee2e2;color:#dc2626;}
+.card-time{font-size:10px;color:var(--text-muted);}
+.card-conf{font-size:10px;color:var(--text-light);}
+.card-trail{display:flex;gap:10px;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-light);}
+.card-trail-item{font-size:9px;color:var(--text-light);}
+.card-trail-item span{font-weight:600;color:var(--text-medium);}
+
+.loading{text-align:center;padding:40px;}
+.spinner{width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+.empty-state{text-align:center;padding:40px;}
+.empty-icon{font-size:36px;margin-bottom:8px;}
+.empty-text{font-size:14px;font-weight:600;color:var(--text-medium);}
+.empty-sub{font-size:11px;color:var(--text-muted);margin-top:4px;}
+
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:999;transform:translateY(100px);opacity:0;transition:all 0.3s;}
+.toast.show{transform:translateY(0);opacity:1;}
+.toast.success{background:#dcfce7;color:#15803d;border:1px solid #86efac;}
+.toast.error{background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;}
+.toast.info{background:#eff6ff;color:#2563eb;border:1px solid #93c5fd;}
+
+.footer{padding:15px 24px;text-align:center;color:var(--text-muted);font-size:11px;margin-top:20px;}
+.footer a{color:var(--blue);text-decoration:none;}
+</style>
+</head>
+<body>
+
+<div class="header">
+    <div class="header-left">
+        <h1>⚡ StrikeTrail</h1>
+        <div class="subtitle">ATR Trailing Stop Scanner — NIFTY & BANKNIFTY Futures</div>
+    </div>
+    <div class="header-right">
+        <button class="hb hb-scan" id="scanBtn" onclick="runScan()">⚡ Scan Now</button>
+        <a href="history.html" class="hb hb-history">📋 History</a>
+        <a href="/refresh" class="hb hb-token" target="_blank">🔑 Token</a>
+    </div>
+</div>
+
+<div class="status-bar">
+    <div class="status-left">
+        <div class="status-dot" id="sDot"></div>
+        <span class="status-text" id="sText">Connecting...</span>
+    </div>
+    <div class="status-right">
+        <span>🕐 <span id="sTime">--:--</span></span>
+        <span>📊 <span id="sRegime">--</span></span>
+        <span id="sBuyCount">Buy: 0</span>
+        <span id="sSellCount">Sell: 0</span>
+    </div>
+</div>
+
+<div class="filters">
+    <button class="f-btn active" onclick="setFilter('all',this)">All</button>
+    <button class="f-btn" onclick="setFilter('NIFTY',this)">NIFTY</button>
+    <button class="f-btn" onclick="setFilter('BANKNIFTY',this)">BANKNIFTY</button>
+    <button class="f-btn" onclick="setFilter('BUY-LONG',this)">🟢 Buy</button>
+    <button class="f-btn" onclick="setFilter('SELL-SHORT',this)">🔴 Sell</button>
+    <button class="f-btn" onclick="setFilter('ATR-TS',this)">ATR-TS</button>
+</div>
+
+<div class="panels">
+    <div class="panel">
+        <div class="panel-header buy">
+            <div class="panel-title buy-title">📈 Intraday Buy</div>
+            <div class="panel-count buy-count" id="buyCountPanel">0</div>
+        </div>
+        <div class="panel-body" id="buyPanel">
+            <div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">No Buy Signals</div><div class="empty-sub">Run a scan to find opportunities</div></div>
+        </div>
+    </div>
+    <div class="panel">
+        <div class="panel-header sell">
+            <div class="panel-title sell-title">📉 Intraday Sell</div>
+            <div class="panel-count sell-count" id="sellCountPanel">0</div>
+        </div>
+        <div class="panel-body" id="sellPanel">
+            <div class="empty-state"><div class="empty-icon">📉</div><div class="empty-text">No Sell Signals</div><div class="empty-sub">Run a scan to find opportunities</div></div>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="footer">
+    StrikeTrail v1.0 — ATR Trailing Stop Scanner &middot;
+    NIFTY (15m: Fast 3/1.0, Slow 25/2.0) &middot;
+    BANKNIFTY (5m: Fast 5/0.7, Slow 20/3.5) &middot;
+    <a href="history.html">History</a> &middot;
+    <a href="/refresh">Token</a>
+</div>
+
+<script>
+var API_BASE='https://striketrail.onrender.com';
+var allSignals=[];
+var currentFilter='all';
+
+function showToast(m,t){
+    var e=document.getElementById('toast');
+    e.textContent=m;
+    e.className='toast '+t+' show';
+    setTimeout(function(){e.className='toast';},3000);
+}
+
+function setPanelsLoading(){
+    var loadingHTML='<div class="loading"><div class="spinner"></div><div style="margin-top:8px;font-size:12px;color:#aaa">Loading...</div></div>';
+    document.getElementById('buyPanel').innerHTML=loadingHTML;
+    document.getElementById('sellPanel').innerHTML=loadingHTML;
+}
+
+function setPanelsEmpty(){
+    document.getElementById('buyPanel').innerHTML=
+        '<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">No Buy Signals</div><div class="empty-sub">Run a scan to find opportunities</div></div>';
+    document.getElementById('sellPanel').innerHTML=
+        '<div class="empty-state"><div class="empty-icon">📉</div><div class="empty-text">No Sell Signals</div><div class="empty-sub">Run a scan to find opportunities</div></div>';
+}
+
+function updateStatus(data){
+    var s=data.scanner_status||'UNKNOWN';
+    var dot=document.getElementById('sDot');
+    var txt=document.getElementById('sText');
+
+    if(s==='ACTIVE'||s==='SCANNING'){
+        dot.className='status-dot active';
+        txt.textContent='Scanner Active';
+    } else if(s==='MARKET_CLOSED'){
+        dot.className='status-dot closed';
+        txt.textContent='Market Closed';
+    } else if(s==='NO_TOKEN'){
+        dot.className='status-dot error';
+        txt.textContent='Token Expired — Click 🔑 Token';
+    } else if(s==='PRE_MARKET'){
+        dot.className='status-dot closed';
+        txt.textContent='Pre-Market';
+    } else {
+        dot.className='status-dot';
+        txt.textContent=s;
+    }
+}
+
+function renderCard(s){
+    var isBuy=s.direction==='BUY-LONG';
+    var cardClass=isBuy?'card buy-card':'card sell-card';
+    var badgeClass=isBuy?'card-badge buy-badge':'card-badge sell-badge';
+    var badgeText=isBuy?'BUY':'SELL';
+    var gradeClass='card-grade grade-'+(s.grade==='A+'?'aplus':s.grade==='A'?'a':s.grade==='B'?'b':'c');
+    var confPct=Math.round((s.confidence||0)*100);
+
+    var timeStr='';
+    try{
+        var d=new Date(s.scan_date);
+        timeStr=d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Kolkata'});
+    }catch(e){timeStr=s.scan_time||'';}
+
+    var html='<div class="'+cardClass+'">';
+    html+='<div class="card-top">';
+    html+='<div><div class="card-symbol">'+s.symbol+'</div><div class="card-model">'+s.model+' · '+(s.timeframe||'')+'</div></div>';
+    html+='<span class="'+badgeClass+'">'+badgeText+'</span>';
+    html+='</div>';
+
+    html+='<div class="card-grid">';
+    html+='<div class="card-item"><div class="label">Entry</div><div class="value blue">'+s.entry+'</div></div>';
+    html+='<div class="card-item"><div class="label">Stop Loss</div><div class="value red">'+s.sl+'</div></div>';
+    html+='<div class="card-item"><div class="label">Target 1</div><div class="value orange">'+(s.target_1||'')+'</div></div>';
+    html+='<div class="card-item"><div class="label">Target 2</div><div class="value green">'+(s.target_2||s.target||'')+'</div></div>';
+    html+='<div class="card-item"><div class="label">R:R</div><div class="value purple">'+(s.risk_reward||'')+'</div></div>';
+    html+='<div class="card-item"><div class="label">Regime</div><div class="value '+(s.regime==='BULL'?'green':'red')+'">'+(s.regime||'')+'</div></div>';
+    html+='</div>';
+
+    html+='<div class="card-trail">';
+    html+='<div class="card-trail-item">Fast Trail: <span>'+(s.trail1||'')+'</span></div>';
+    html+='<div class="card-trail-item">Slow Trail: <span>'+(s.trail2||'')+'</span></div>';
+    html+='<div class="card-trail-item">Bar: <span>'+(s.bar_color||'')+'</span></div>';
+    html+='</div>';
+
+    html+='<div class="card-bottom">';
+    html+='<span class="'+gradeClass+'">'+s.grade+' ('+s.grade_score+')</span>';
+    html+='<span class="card-conf">Conf: '+confPct+'%</span>';
+    html+='<span class="card-time">'+timeStr+'</span>';
+    html+='</div>';
+    html+='</div>';
+
+    return html;
+}
+
+function renderSignals(){
+    var filtered=allSignals;
+
+    if(currentFilter!=='all'){
+        filtered=allSignals.filter(function(s){
+            return s.symbol===currentFilter ||
+                   s.model===currentFilter ||
+                   s.direction===currentFilter;
+        });
+    }
+
+    var buys=filtered.filter(function(s){return s.direction==='BUY-LONG';});
+    var sells=filtered.filter(function(s){return s.direction==='SELL-SHORT';});
+
+    document.getElementById('buyCountPanel').textContent=buys.length;
+    document.getElementById('sellCountPanel').textContent=sells.length;
+    document.getElementById('sBuyCount').textContent='Buy: '+buys.length;
+    document.getElementById('sSellCount').textContent='Sell: '+sells.length;
+
+    if(buys.length===0 && sells.length===0){
+        setPanelsEmpty();
+        return;
+    }
+
+    var buyHtml='';
+    if(buys.length===0){
+        buyHtml='<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">No Buy Signals</div><div class="empty-sub">Run a scan to find opportunities</div></div>';
+    } else {
+        buys.forEach(function(s){ buyHtml+=renderCard(s); });
+    }
+    document.getElementById('buyPanel').innerHTML=buyHtml;
+
+    var sellHtml='';
+    if(sells.length===0){
+        sellHtml='<div class="empty-state"><div class="empty-icon">📉</div><div class="empty-text">No Sell Signals</div><div class="empty-sub">Run a scan to find opportunities</div></div>';
+    } else {
+        sells.forEach(function(s){ sellHtml+=renderCard(s); });
+    }
+    document.getElementById('sellPanel').innerHTML=sellHtml;
+}
+
+function saveHistory(signals){
+    try{
+        var existing=[];
+        var raw=localStorage.getItem('signalHistory');
+        if(raw) existing=JSON.parse(raw);
+
+        var existingIds={};
+        existing.forEach(function(s){if(s._id) existingIds[s._id]=true;});
+
+        var newOnes=signals.filter(function(s){
+            return s._id && !existingIds[s._id];
+        });
+
+        newOnes.forEach(function(s){
+            s.scanner_type='atr_trailing';
+            existing.push(s);
+        });
+
+        if(existing.length>5000){
+            existing=existing.slice(existing.length-5000);
+        }
+
+        localStorage.setItem('signalHistory',JSON.stringify(existing));
+
+        if(newOnes.length>0){
+            console.log('Saved '+newOnes.length+' new signals to history');
+        }
+    }catch(e){
+        console.error('Save history error:',e);
+    }
+}
+
+async function runScan(){
+    var btn=document.getElementById('scanBtn');
+    btn.disabled=true;
+    btn.textContent='⏳ Scanning...';
+
+    setPanelsLoading();
+
+    try{
+        var r=await fetch(API_BASE+'/api/signals');
+
+        if(!r.ok){
+            throw new Error('API Error');
+        }
+
+        var d=await r.json();
+
+        updateStatus(d);
+
+        allSignals=d.signals||[];
+
+        renderSignals();
+
+        if(allSignals.length>0){
+            saveHistory(allSignals);
+        }
+
+        var sr=await fetch(API_BASE+'/api/status');
+        if(sr.ok){
+            var sd=await sr.json();
+            if(sd.server_time_ist){
+                var dt=new Date(sd.server_time_ist);
+                document.getElementById('sTime').textContent=
+                    dt.toLocaleTimeString('en-IN',{hour12:false,timeZone:'Asia/Kolkata'});
+            }
+            document.getElementById('sRegime').textContent=
+                sd.scanner_status==='ACTIVE'?'ACTIVE':'CLOSED';
+        }
+
+        showToast('Scan complete: '+allSignals.length+' signals',
+                  allSignals.length>0?'success':'info');
+
+    }catch(e){
+        console.error(e);
+        setPanelsEmpty();
+        showToast('Connection error — check token','error');
+        document.getElementById('sDot').className='status-dot error';
+        document.getElementById('sText').textContent='Connection Error';
+    }
+
+    btn.disabled=false;
+    btn.textContent='⚡ Scan Now';
+}
+
+function setFilter(f,b){
+    currentFilter=f;
+    document.querySelectorAll('.f-btn').forEach(function(x){x.classList.remove('active');});
+    b.classList.add('active');
+    renderSignals();
+}
+
+localStorage.setItem('strikeTrailApiUrl',API_BASE);
+
+runScan();
+
+setInterval(function(){
+    fetch(API_BASE+'/api/signals')
+        .then(function(r){
+            if(!r.ok) return null;
+            return r.json();
+        })
+        .then(function(d){
+            if(!d) return;
+            updateStatus(d);
+            var ns=d.signals||[];
+            if(JSON.stringify(ns)!==JSON.stringify(allSignals)){
+                allSignals=ns;
+                renderSignals();
+                if(ns.length>0) saveHistory(ns);
+            }
+        })
+        .catch(function(){});
+},60000);
+</script>
+
+</body>
+</html>
