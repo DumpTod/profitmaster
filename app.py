@@ -16,9 +16,9 @@ app.secret_key = os.environ.get('FLASK_SECRET', 'atr-scanner-secret-key-2024')
 # ========================================
 # 🔑 FILL YOUR UPSTOX CREDENTIALS
 # ========================================
-API_KEY = "PASTE_YOUR_API_KEY_HERE"
-API_SECRET = "PASTE_YOUR_API_SECRET_HERE"
-REDIRECT_URI = "PASTE_YOUR_REDIRECT_URI_HERE"
+API_KEY = "dd06178d-b9a1-4854-b9fc-1bde72620f86"
+API_SECRET = "un701txcrg"
+REDIRECT_URI = "https://127.0.0.1"
 
 # ========================================
 # Scanner Settings (from backtest)
