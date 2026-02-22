@@ -32,7 +32,7 @@ SCANNER_CONFIG = {
         'fast_mult': 1.0,
         'slow_period': 25,
         'slow_mult': 2.0,
-        'lot_size': 25
+        'lot_size': 65
     },
     'BANKNIFTY': {
         'instrument_key': 'NSE_INDEX|Nifty Bank',
@@ -42,7 +42,7 @@ SCANNER_CONFIG = {
         'fast_mult': 0.7,
         'slow_period': 20,
         'slow_mult': 3.5,
-        'lot_size': 15
+        'lot_size': 30
     }
 }
 
