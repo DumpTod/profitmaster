@@ -16,8 +16,8 @@ app.secret_key = os.environ.get('FLASK_SECRET', 'atr-scanner-secret-key-2024')
 # ========================================
 # 🔑 FILL YOUR UPSTOX CREDENTIALS
 # ========================================
-API_KEY = "dd06178d-b9a1-4854-b9fc-1bde72620f86"
-API_SECRET = "un701txcrg"
+API_KEY = os.environ.get('API_KEY', 'dd06178d-b9a1-4854-b9fc-1bde72620f86')
+API_SECRET = os.environ.get('API_SECRET', 'un701txcrg')
 REDIRECT_URI = "https://profitmaster.onrender.com/callback"
 
 # ========================================
