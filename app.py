@@ -577,60 +577,68 @@ def api_track():
             return jsonify({'status': 'error', 'message': 'No signals provided'})
 
         headers = get_headers()
-        if not headers:
-            return jsonify({'status': 'error', 'message': 'No token'})
-
         results = []
+
         for sig in data['signals']:
             symbol = sig.get('symbol', '')
             config = SCANNER_CONFIG.get(symbol)
-            if not config:
-                continue
+            entry = float(sig.get('entry', 0))
+            sl = float(sig.get('sl', 0))
+            t1 = float(sig.get('target_1', sig.get('target', 0)))
+            t2 = float(sig.get('target_2', sig.get('target', 0)))
+            direction = sig.get('direction', '')
 
-            try:
-                df_1m = fetch_candles(config['instrument_key'], '1minute', days=1)
-                if len(df_1m) == 0:
-                    continue
+            current_price = None
 
-                current_price = df_1m.iloc[-1]['close']
-                entry = float(sig.get('entry', 0))
-                sl = float(sig.get('sl', 0))
-                t1 = float(sig.get('target_1', sig.get('target', 0)))
-                t2 = float(sig.get('target_2', sig.get('target', 0)))
-                direction = sig.get('direction', '')
+            # Try to get live price if token available
+            if headers and config:
+                try:
+                    df_1m = fetch_candles(config['instrument_key'], '1minute', days=1)
+                    if len(df_1m) > 0:
+                        current_price = float(df_1m.iloc[-1]['close'])
+                except:
+                    pass
 
-                status = 'open'
-                exit_price = None
-
-                if direction == 'BUY-LONG':
-                    if current_price >= t2:
-                        status = 'target_hit'
-                        exit_price = t2
-                    elif current_price <= sl:
-                        status = 'stop_hit'
-                        exit_price = sl
-                    pnl_pct = round((current_price - entry) / entry * 100, 2)
-                else:
-                    if current_price <= t2:
-                        status = 'target_hit'
-                        exit_price = t2
-                    elif current_price >= sl:
-                        status = 'stop_hit'
-                        exit_price = sl
-                    pnl_pct = round((entry - current_price) / entry * 100, 2)
-
+            # If no live price, use entry as fallback
+            if not current_price:
                 results.append({
                     '_id': sig.get('_id'),
-                    'status': status,
-                    'exit_price': exit_price,
-                    'current_price': current_price,
-                    'live_pnl_pct': pnl_pct,
-                    'track_status': 'tracked'
+                    'status': 'pending',
+                    'exit_price': None,
+                    'current_price': None,
+                    'live_pnl_pct': 0,
+                    'track_status': 'no_price_available'
                 })
-
-            except Exception as e:
-                print(f"Track error for {symbol}: {e}")
                 continue
+
+            status = 'open'
+            exit_price = None
+
+            if direction == 'BUY-LONG':
+                if current_price >= t2:
+                    status = 'target_hit'
+                    exit_price = t2
+                elif current_price <= sl:
+                    status = 'stop_hit'
+                    exit_price = sl
+                pnl_pct = round((current_price - entry) / entry * 100, 2)
+            else:
+                if current_price <= t2:
+                    status = 'target_hit'
+                    exit_price = t2
+                elif current_price >= sl:
+                    status = 'stop_hit'
+                    exit_price = sl
+                pnl_pct = round((entry - current_price) / entry * 100, 2)
+
+            results.append({
+                '_id': sig.get('_id'),
+                'status': status,
+                'exit_price': exit_price,
+                'current_price': current_price,
+                'live_pnl_pct': pnl_pct,
+                'track_status': 'tracked'
+            })
 
         return jsonify({'status': 'success', 'results': results})
 
