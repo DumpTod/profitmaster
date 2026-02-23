@@ -61,7 +61,22 @@ scan_cache = {
     'daily_trades': {}
 }
 
+def save_token(access_token):
+    token_data['access_token'] = access_token
+    token_data['token_time'] = datetime.now(IST).isoformat()
+    with open('/tmp/token.json', 'w') as f:
+        json.dump(token_data, f)
 
+def load_token():
+    try:
+        with open('/tmp/token.json', 'r') as f:
+            data = json.load(f)
+            token_data['access_token'] = data.get('access_token')
+            token_data['token_time'] = data.get('token_time')
+    except:
+        pass
+
+load_token()
 # ========================================
 # AUTH ROUTES
 # ========================================
