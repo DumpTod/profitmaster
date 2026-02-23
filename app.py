@@ -100,8 +100,7 @@ def callback():
 
         if r.status_code == 200:
             data = r.json()
-            token_data['access_token'] = data['access_token']
-            token_data['token_time'] = datetime.now(IST).isoformat()
+            save_token(data['access_token'])
             return '''
             <html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#1a2a4a;color:white">
             <h1>✅ Token Refreshed!</h1>
