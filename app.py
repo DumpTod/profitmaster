@@ -596,8 +596,8 @@ def api_track():
                 continue
 
             try:
-                signal_time = pd.to_datetime(scan_date)
-                df_1m = fetch_candles(config['instrument_key'], '1minute', days=5)
+                signal_time = pd.to_datetime(scan_date).replace(tzinfo=None)
+                df_1m['datetime'] = pd.to_datetime(df_1m['datetime']).dt.tz_localize(None)
 
                 if len(df_1m) == 0:
                     results.append({'_id': sig.get('_id'), 'status': 'pending',
