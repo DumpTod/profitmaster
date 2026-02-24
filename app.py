@@ -648,7 +648,8 @@ def api_track():
                                     'debug': debug_info})
                     continue
 
-                df_post_entry = df_after.iloc[entry_idx:].reset_index(drop=True)
+                entry_pos = df_after.index.get_loc(entry_idx)
+                df_post_entry = df_after.iloc[entry_pos:].reset_index(drop=True)
                 status = 'open'
                 exit_price = None
                 current_price = float(df_post_entry.iloc[-1]['close'])
