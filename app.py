@@ -428,7 +428,7 @@ def generate_signals():
                         grade = 'C'
                         grade_score = 55
 
-                    signal_time = pd.to_datetime(row['datetime'])
+                    signal_time = pd.to_datetime(scan_date).tz_localize(IST) if pd.to_datetime(scan_date).tzinfo is None else pd.to_datetime(scan_date).tz_convert(IST)
 
                     signals.append({
                         '_id': f"{symbol}_{signal_time.strftime('%Y%m%d_%H%M')}",
@@ -605,7 +605,7 @@ def api_track():
                                     'live_pnl_pct': 0, 'track_status': 'no_price_available'})
                     continue
 
-                df_1m['datetime'] = pd.to_datetime(df_1m['datetime'])
+                df_1m['datetime'] = pd.to_datetime(df_1m['datetime']).dt.tz_localize(IST, ambiguous='NaT', nonexistent='NaT')
 
                 # Only candles AFTER signal time
                 df_after = df_1m[df_1m['datetime'] > signal_time].reset_index(drop=True)
@@ -641,7 +641,7 @@ def api_track():
                     continue
 
                 # Step 2: Only check SL/Target AFTER entry was met
-                df_post_entry = df_after.iloc[entry_time_idx:].reset_index(drop=True)
+                df_post_entry = df_after.iloc[idx:].reset_index(drop=True)
 
                 status = 'open'
                 exit_price = None
