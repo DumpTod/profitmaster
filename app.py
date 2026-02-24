@@ -587,58 +587,103 @@ def api_track():
             t1 = float(sig.get('target_1', sig.get('target', 0)))
             t2 = float(sig.get('target_2', sig.get('target', 0)))
             direction = sig.get('direction', '')
+            scan_date = sig.get('scan_date', '')
 
-            current_price = None
-
-            # Try to get live price if token available
-            if headers and config:
-                try:
-                    df_1m = fetch_candles(config['instrument_key'], '1minute', days=1)
-                    if len(df_1m) > 0:
-                        current_price = float(df_1m.iloc[-1]['close'])
-                except:
-                    pass
-
-            # If no live price, use entry as fallback
-            if not current_price:
-                results.append({
-                    '_id': sig.get('_id'),
-                    'status': 'pending',
-                    'exit_price': None,
-                    'current_price': None,
-                    'live_pnl_pct': 0,
-                    'track_status': 'no_price_available'
-                })
+            if not headers or not config:
+                results.append({'_id': sig.get('_id'), 'status': 'pending',
+                                'exit_price': None, 'current_price': None,
+                                'live_pnl_pct': 0, 'track_status': 'no_token'})
                 continue
 
-            status = 'open'
-            exit_price = None
+            try:
+                signal_time = pd.to_datetime(scan_date)
+                df_1m = fetch_candles(config['instrument_key'], '1minute', days=5)
 
-            if direction == 'BUY-LONG':
-                if current_price >= t2:
-                    status = 'target_hit'
-                    exit_price = t2
-                elif current_price <= sl:
-                    status = 'stop_hit'
-                    exit_price = sl
-                pnl_pct = round((current_price - entry) / entry * 100, 2)
-            else:
-                if current_price <= t2:
-                    status = 'target_hit'
-                    exit_price = t2
-                elif current_price >= sl:
-                    status = 'stop_hit'
-                    exit_price = sl
-                pnl_pct = round((entry - current_price) / entry * 100, 2)
+                if len(df_1m) == 0:
+                    results.append({'_id': sig.get('_id'), 'status': 'pending',
+                                    'exit_price': None, 'current_price': None,
+                                    'live_pnl_pct': 0, 'track_status': 'no_price_available'})
+                    continue
 
-            results.append({
-                '_id': sig.get('_id'),
-                'status': status,
-                'exit_price': exit_price,
-                'current_price': current_price,
-                'live_pnl_pct': pnl_pct,
-                'track_status': 'tracked'
-            })
+                df_1m['datetime'] = pd.to_datetime(df_1m['datetime'])
+
+                # Only candles AFTER signal time
+                df_after = df_1m[df_1m['datetime'] > signal_time].reset_index(drop=True)
+
+                if len(df_after) == 0:
+                    results.append({'_id': sig.get('_id'), 'status': 'pending',
+                                    'exit_price': None, 'current_price': None,
+                                    'live_pnl_pct': 0, 'track_status': 'no_candles_after_signal'})
+                    continue
+
+                # Step 1: Check if entry price was reached
+                entry_met = False
+                entry_time_idx = None
+
+                for idx, row in df_after.iterrows():
+                    if direction == 'BUY-LONG':
+                        if row['high'] >= entry:
+                            entry_met = True
+                            entry_time_idx = idx
+                            break
+                    else:
+                        if row['low'] <= entry:
+                            entry_met = True
+                            entry_time_idx = idx
+                            break
+
+                if not entry_met:
+                    current_price = float(df_after.iloc[-1]['close'])
+                    pnl_pct = round((current_price - entry) / entry * 100, 2) if direction == 'BUY-LONG' else round((entry - current_price) / entry * 100, 2)
+                    results.append({'_id': sig.get('_id'), 'status': 'pending',
+                                    'exit_price': None, 'current_price': current_price,
+                                    'live_pnl_pct': pnl_pct, 'track_status': 'entry_not_met'})
+                    continue
+
+                # Step 2: Only check SL/Target AFTER entry was met
+                df_post_entry = df_after.iloc[entry_time_idx:].reset_index(drop=True)
+
+                status = 'open'
+                exit_price = None
+                current_price = float(df_post_entry.iloc[-1]['close'])
+
+                for idx, row in df_post_entry.iterrows():
+                    if direction == 'BUY-LONG':
+                        if row['high'] >= t2:
+                            status = 'target_hit'
+                            exit_price = t2
+                            break
+                        elif row['low'] <= sl:
+                            status = 'stop_hit'
+                            exit_price = sl
+                            break
+                    else:
+                        if row['low'] <= t2:
+                            status = 'target_hit'
+                            exit_price = t2
+                            break
+                        elif row['high'] >= sl:
+                            status = 'stop_hit'
+                            exit_price = sl
+                            break
+
+                pnl_pct = round((current_price - entry) / entry * 100, 2) if direction == 'BUY-LONG' else round((entry - current_price) / entry * 100, 2)
+
+                results.append({
+                    '_id': sig.get('_id'),
+                    'status': status,
+                    'exit_price': exit_price,
+                    'current_price': current_price,
+                    'live_pnl_pct': pnl_pct,
+                    'track_status': 'tracked'
+                })
+
+            except Exception as e:
+                print(f"Track error for {symbol}: {e}")
+                results.append({'_id': sig.get('_id'), 'status': 'pending',
+                                'exit_price': None, 'current_price': None,
+                                'live_pnl_pct': 0, 'track_status': f'error: {str(e)}'})
+                continue
 
         return jsonify({'status': 'success', 'results': results})
 
