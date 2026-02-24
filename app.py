@@ -597,52 +597,58 @@ def api_track():
 
             try:
                 signal_time = pd.to_datetime(scan_date).replace(tzinfo=None)
-                df_1m['datetime'] = pd.to_datetime(df_1m['datetime']).dt.tz_localize(None)
+                df_1m = fetch_candles(config['instrument_key'], '1minute', days=5)
 
                 if len(df_1m) == 0:
                     results.append({'_id': sig.get('_id'), 'status': 'pending',
                                     'exit_price': None, 'current_price': None,
-                                    'live_pnl_pct': 0, 'track_status': 'no_price_available'})
+                                    'live_pnl_pct': 0, 'track_status': 'no_candles_fetched'})
                     continue
 
-                df_1m['datetime'] = pd.to_datetime(df_1m['datetime']).dt.tz_localize(IST, ambiguous='NaT', nonexistent='NaT')
-
-                # Only candles AFTER signal time
+                df_1m['datetime'] = pd.to_datetime(df_1m['datetime']).dt.tz_localize(None)
                 df_after = df_1m[df_1m['datetime'] > signal_time].reset_index(drop=True)
+
+                debug_info = {
+                    'signal_time': str(signal_time),
+                    'total_candles': len(df_1m),
+                    'candles_after_signal': len(df_after),
+                    'first_candle': str(df_1m.iloc[0]['datetime']) if len(df_1m) > 0 else None,
+                    'last_candle': str(df_1m.iloc[-1]['datetime']) if len(df_1m) > 0 else None,
+                    'entry': entry, 'sl': sl, 't2': t2, 'direction': direction
+                }
 
                 if len(df_after) == 0:
                     results.append({'_id': sig.get('_id'), 'status': 'pending',
                                     'exit_price': None, 'current_price': None,
-                                    'live_pnl_pct': 0, 'track_status': 'no_candles_after_signal'})
+                                    'live_pnl_pct': 0, 'track_status': 'no_candles_after_signal',
+                                    'debug': debug_info})
                     continue
 
-                # Step 1: Check if entry price was reached
                 entry_met = False
-                entry_time_idx = None
+                entry_idx = None
 
                 for idx, row in df_after.iterrows():
-                    if direction == 'BUY-LONG':
-                        if row['high'] >= entry:
-                            entry_met = True
-                            entry_time_idx = idx
-                            break
-                    else:
-                        if row['low'] <= entry:
-                            entry_met = True
-                            entry_time_idx = idx
-                            break
+                    if direction == 'BUY-LONG' and row['high'] >= entry:
+                        entry_met = True
+                        entry_idx = idx
+                        break
+                    elif direction != 'BUY-LONG' and row['low'] <= entry:
+                        entry_met = True
+                        entry_idx = idx
+                        break
+
+                debug_info['entry_met'] = entry_met
+                debug_info['entry_idx'] = entry_idx
 
                 if not entry_met:
                     current_price = float(df_after.iloc[-1]['close'])
-                    pnl_pct = round((current_price - entry) / entry * 100, 2) if direction == 'BUY-LONG' else round((entry - current_price) / entry * 100, 2)
                     results.append({'_id': sig.get('_id'), 'status': 'pending',
                                     'exit_price': None, 'current_price': current_price,
-                                    'live_pnl_pct': pnl_pct, 'track_status': 'entry_not_met'})
+                                    'live_pnl_pct': 0, 'track_status': 'entry_not_met',
+                                    'debug': debug_info})
                     continue
 
-                # Step 2: Only check SL/Target AFTER entry was met
-                df_post_entry = df_after.iloc[idx:].reset_index(drop=True)
-
+                df_post_entry = df_after.iloc[entry_idx:].reset_index(drop=True)
                 status = 'open'
                 exit_price = None
                 current_price = float(df_post_entry.iloc[-1]['close'])
@@ -675,21 +681,20 @@ def api_track():
                     'exit_price': exit_price,
                     'current_price': current_price,
                     'live_pnl_pct': pnl_pct,
-                    'track_status': 'tracked'
+                    'track_status': 'tracked',
+                    'debug': debug_info
                 })
 
             except Exception as e:
-                print(f"Track error for {symbol}: {e}")
                 results.append({'_id': sig.get('_id'), 'status': 'pending',
                                 'exit_price': None, 'current_price': None,
-                                'live_pnl_pct': 0, 'track_status': f'error: {str(e)}'})
+                                'live_pnl_pct': 0, 'track_status': f'error:{str(e)}'})
                 continue
 
         return jsonify({'status': 'success', 'results': results})
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
