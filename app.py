@@ -325,7 +325,6 @@ def resample_candles(df_1m, minutes):
 _option_contracts_cache = {}
 
 def get_option_contracts_live(symbol, expiry_date_str):
-    """Fetch live (non-expired) option contracts for a given expiry."""
     cache_key = (symbol, expiry_date_str)
     if cache_key in _option_contracts_cache:
         return _option_contracts_cache[cache_key]
@@ -338,6 +337,34 @@ def get_option_contracts_live(symbol, expiry_date_str):
     instrument_key = config.get('options_key', '')
     url    = 'https://api.upstox.com/v2/option/chain'
     params = {'instrument_key': instrument_key, 'expiry_date': expiry_date_str}
+
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        if r.status_code == 200:
+            data   = r.json().get('data', [])
+            result = {}
+            for item in data:
+                strike = item.get('strike_price')
+                for otype, itype in [('call_options','CE'), ('put_options','PE')]:
+                    opt = item.get(otype) or {}
+                    if not opt:
+                        continue
+                    ikey        = opt.get('instrument_key', '')
+                    market_data = opt.get('market_data') or {}
+                    # Use last_price as LTP fallback (end-of-day value)
+                    ltp = (float(market_data.get('ltp') or 0)
+                           or float(market_data.get('close_price') or 0)
+                           or float(market_data.get('last_price') or 0))
+                    if strike and ikey:
+                        result[(float(strike), itype)] = {'key': ikey, 'ltp': ltp}
+            _option_contracts_cache[cache_key] = result
+            return result
+        else:
+            print(f"Option chain error {r.status_code}: {r.text[:300]}")
+            return {}
+    except Exception as e:
+        print(f"Option chain exception: {e}")
+        return {}
 
     try:
         r = requests.get(url, headers=headers, params=params)
@@ -852,6 +879,16 @@ def debug_chain():
     data = r.json().get('data', [])
     # Return 3 strikes raw so we can see exact JSON structure
     return jsonify(data[20:23] if len(data) > 3 else data)
+    @app.route('/api/raw-chain')
+def raw_chain():
+    headers = get_headers()
+    if not headers:
+        return jsonify({'error': 'no token'})
+    url    = 'https://api.upstox.com/v2/option/chain'
+    params = {'instrument_key': 'NSE_INDEX|Nifty Bank', 'expiry_date': '2026-03-31'}
+    r      = requests.get(url, headers=headers, params=params, timeout=10)
+    data   = r.json().get('data', [])
+    return jsonify(data[10:12] if len(data) > 2 else data)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
