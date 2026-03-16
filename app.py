@@ -841,6 +841,17 @@ def debug_option_chain():
         # Return first 2 items raw so we can inspect structure
         return jsonify({'status': 'ok', 'expiry': str(expiry), 'sample': data[:2]})
     return jsonify({'error': r.text[:500]})
+    @app.route('/api/debug-chain')
+def debug_chain():
+    headers = get_headers()
+    if not headers:
+        return jsonify({'error': 'no token'})
+    url = 'https://api.upstox.com/v2/option/chain'
+    params = {'instrument_key': 'NSE_INDEX|Nifty Bank', 'expiry_date': '2026-03-31'}
+    r = requests.get(url, headers=headers, params=params)
+    data = r.json().get('data', [])
+    # Return 3 strikes raw so we can see exact JSON structure
+    return jsonify(data[20:23] if len(data) > 3 else data)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
