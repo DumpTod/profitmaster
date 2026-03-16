@@ -325,48 +325,60 @@ def resample_candles(df_1m, minutes):
 _option_contracts_cache = {}
 
 def get_option_contracts_live(symbol, expiry_date_str):
-    """Fetch live (non-expired) option contracts for a given expiry."""
-    cache_key = (symbol, expiry_date_str)
-    if cache_key in _option_contracts_cache:
-        return _option_contracts_cache[cache_key]
-
     headers = get_headers()
     if not headers:
         return {}
 
     config         = SCANNER_CONFIG.get(symbol, {})
     instrument_key = config.get('options_key', '')
-    url    = 'https://api.upstox.com/v2/option/chain'
-    params = {'instrument_key': instrument_key, 'expiry_date': expiry_date_str}
 
+    # Step 1: Get instrument keys from option/contract endpoint
+    url    = 'https://api.upstox.com/v2/option/contract'
+    params = {'instrument_key': instrument_key, 'expiry_date': expiry_date_str}
     try:
-        r = requests.get(url, headers=headers, params=params)
-        if r.status_code == 200:
-            data    = r.json().get('data', [])
-            result  = {}
-            for item in data:
-                strike = item.get('strike_price')
-                for otype, itype in [('call_options','CE'), ('put_options','PE')]:
-                    opt = item.get(otype) or {}
-                    if not opt:
-                        continue
-                    # Confirmed Upstox structure:
-                    # call_options.instrument_key  (top-level)
-                    # call_options.market_data.ltp (nested under market_data)
-                    ikey        = opt.get('instrument_key', '')
-                    market_data = opt.get('market_data') or {}
-                    ltp_val   = float(market_data.get('ltp') or 0)
-                    close_val = float(market_data.get('close_price') or 0)
-                    ltp       = ltp_val if ltp_val > 0 else close_val
-                    if strike and ikey:
-                        result[(float(strike), itype)] = {'key': ikey, 'ltp': ltp}
-            _option_contracts_cache[cache_key] = result
-            return result
-        else:
-            print(f"Option chain error {r.status_code}: {r.text[:200]}")
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        if r.status_code != 200:
             return {}
+        contracts = r.json().get('data', [])
+        if not contracts:
+            return {}
+
+        # Build strike -> instrument_key map
+        key_map = {}
+        ikeys_to_fetch = []
+        for c in contracts:
+            strike = float(c.get('strike_price', 0))
+            itype  = c.get('instrument_type', '')  # CE or PE
+            ikey   = c.get('instrument_key', '')
+            if strike and itype and ikey:
+                key_map[(strike, itype)] = ikey
+                ikeys_to_fetch.append(ikey)
+
+        if not ikeys_to_fetch:
+            return {}
+
+        # Step 2: Fetch live LTP via market quotes for all keys at once
+        # Upstox allows comma-separated instrument keys
+        quote_url    = 'https://api.upstox.com/v2/market-quote/ltp'
+        # Limit to avoid URL too long — fetch all, chunk if needed
+        result = {}
+        chunk_size = 50
+        for i in range(0, len(ikeys_to_fetch), chunk_size):
+            chunk  = ikeys_to_fetch[i:i+chunk_size]
+            params2 = {'instrument_key': ','.join(chunk)}
+            r2 = requests.get(quote_url, headers=headers, params=params2, timeout=10)
+            if r2.status_code == 200:
+                quotes = r2.json().get('data', {})
+                for (strike, itype), ikey in key_map.items():
+                    # Upstox returns key with | replaced by : in quotes response
+                    quote_key = ikey.replace('|', ':')
+                    ltp = float((quotes.get(quote_key) or {}).get('ltp') or 0)
+                    result[(strike, itype)] = {'key': ikey, 'ltp': ltp}
+
+        return result
+
     except Exception as e:
-        print(f"Option chain exception: {e}")
+        print(f"Option contracts exception: {e}")
         return {}
 
 
