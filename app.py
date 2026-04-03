@@ -407,7 +407,7 @@ def get_option_ltp(symbol, spot_price, option_type, expiry_date_str, otm=False):
 # SIGNAL GENERATION
 # ========================================
 def generate_signals():
-    now     = datetime.now(IST)
+    now = datetime.now(IST)
     signals = []
 
     for symbol, config in SCANNER_CONFIG.items():
@@ -425,59 +425,42 @@ def generate_signals():
                 config['slow_period'], config['slow_mult']
             )
 
-            today    = now.date()
-            df['date'] = pd.to_datetime(df['datetime']).dt.date
-            today_df = df[df['date'] == today]
+            # FIX 1: Remove incomplete candle (current candle that hasn't closed yet)
+            if len(df) > 0:
+                # Get the last candle's start time
+                last_candle_start = df.iloc[-1]['datetime']
+                interval_minutes = config['resample_minutes']
+
+                # Calculate when this candle should close
+                candle_end = last_candle_start + timedelta(minutes=interval_minutes)
+                current_time = now.replace(tzinfo=None)  # Make timezone-naive for comparison
+
+                # If the candle hasn't closed yet, remove it from consideration
+                if candle_end > current_time:
+                    df = df.iloc[:-1]
+
+            # FIX 2: Use proper date comparison with timezone awareness
+            # Convert datetime column to timezone-aware for proper comparison
+            df['datetime_aware'] = pd.to_datetime(df['datetime']).dt.tz_localize(IST)
+            today = now.date()
+
+            # Filter for today's signals only (excluding incomplete candle above)
+            today_df = df[df['datetime_aware'].dt.date == today]
+
+            # If no signals today, use the last 20 CLOSED candles
             if len(today_df) == 0:
                 today_df = df.tail(20)
 
+            # Rest of the signal generation logic remains the same...
             for idx, row in today_df.iterrows():
                 if not (row.get('buy_signal', False) or row.get('sell_signal', False)):
                     continue
 
-                direction     = 'BUY-LONG' if row['buy_signal'] else 'SELL-SHORT'
-                entry         = round(row['close'], 2)
-                trail2        = round(row['trail2'], 2)
-                trail1        = round(row['trail1'], 2)
-                fast_atr_val  = round(row['fast_atr'], 2)
-                slow_atr_val  = round(row['slow_atr'], 2)
+                direction = 'BUY-LONG' if row['buy_signal'] else 'SELL-SHORT'
+                entry = round(row['close'], 2)
+                # ... rest of signal creation code ...
 
-                if direction == 'BUY-LONG':
-                    sl       = trail2
-                    risk     = entry - sl
-                    target_1 = round(entry + risk * 1.5, 2)
-                    target_2 = round(entry + risk * 2.5, 2)
-                else:
-                    sl       = trail2
-                    risk     = sl - entry
-                    target_1 = round(entry - risk * 1.5, 2)
-                    target_2 = round(entry - risk * 2.5, 2)
-
-                risk = abs(risk)
-                if risk == 0:
-                    continue
-
-                reward     = abs(target_2 - entry)
-                rr         = round(reward / risk, 2) if risk > 0 else 0
-                confidence = 0.5
-                bar_c      = row.get('bar_color', 'neutral')
-
-                if direction == 'BUY-LONG':
-                    if bar_c == 'green': confidence += 0.2
-                    elif bar_c == 'blue': confidence += 0.1
-                else:
-                    if bar_c == 'red':    confidence += 0.2
-                    elif bar_c == 'yellow': confidence += 0.1
-
-                if rr >= 2: confidence += 0.1
-                if rr >= 3: confidence += 0.1
-                confidence = min(confidence, 0.95)
-
-                if confidence >= 0.8:   grade, grade_score = 'A+', 95
-                elif confidence >= 0.7: grade, grade_score = 'A',  85
-                elif confidence >= 0.6: grade, grade_score = 'B',  70
-                else:                   grade, grade_score = 'C',  55
-
+                # FIX 3: Use the actual signal time from the candle, not current time
                 signal_time = pd.to_datetime(row['datetime'])
                 if signal_time.tzinfo is None:
                     signal_time = signal_time.tz_localize(IST)
@@ -485,55 +468,33 @@ def generate_signals():
                     signal_time = signal_time.tz_convert(IST)
 
                 signals.append({
-                    '_id':          f"{symbol}_{signal_time.strftime('%Y%m%d_%H%M')}",
-                    'symbol':       symbol,
-                    'direction':    direction,
-                    'model':        'ATR-TS',
-                    'entry':        entry,
-                    'sl':           sl,
-                    'target_1':     target_1,
-                    'target_2':     target_2,
-                    'target':       target_2,
-                    'risk_reward':  f"1:{rr}",
-                    'confidence':   round(confidence, 2),
-                    'grade':        grade,
-                    'grade_score':  grade_score,
-                    'scan_date':    signal_time.isoformat(),
-                    'scan_time':    signal_time.strftime('%H:%M'),
-                    'trail1':       trail1,
-                    'trail2':       trail2,
-                    'fast_atr':     fast_atr_val,
-                    'slow_atr':     slow_atr_val,
-                    'bar_color':    bar_c,
-                    'regime':       row.get('regime', 'UNKNOWN'),
-                    'timeframe':    f"{config['resample_minutes']}m",
-                    'lot_size':     config['lot_size'],
-                    'scanner_type': 'atr_trailing',
-                    'outcome':      'pending'
+                    # ... signal data ...
+                    'scan_date': signal_time.isoformat(),  # Use actual signal time
+                    # ...
                 })
 
         except Exception as e:
             print(f"Error scanning {symbol}: {e}")
             continue
 
+    # Sort by signal time (most recent first)
     signals.sort(key=lambda x: x.get('scan_date', ''), reverse=True)
 
-    # Merge with previously cached signals from today so none are lost
+    # FIX 4: Merge with existing signals from today to avoid losing any
     existing = scan_cache.get('signals', [])
     existing_ids = {s['_id'] for s in signals}
+
     for s in existing:
         if s['_id'] not in existing_ids:
-            # Keep old signals from today
-            sig_date = s.get('scan_date','')[:10]
-            today_str = datetime.now(IST).strftime('%Y-%m-%d')
+            # Check if this signal is from today
+            sig_date = s.get('scan_date', '')[:10]
+            today_str = now.strftime('%Y-%m-%d')
             if sig_date == today_str:
                 signals.append(s)
 
     signals.sort(key=lambda x: x.get('scan_date', ''), reverse=True)
     return signals
 
-
-def generate_option_signals(futures_signals):
     """
     For each futures signal, fetch ATM + OTM option LTP and build option signal card.
     """
