@@ -425,9 +425,20 @@ def generate_signals():
                 config['slow_period'], config['slow_mult']
             )
 
-            today    = now.date()
-            df['date'] = pd.to_datetime(df['datetime']).dt.date
-            today_df = df[df['date'] == today]
+            # FIX: Remove incomplete candle (current candle that hasn't closed yet)
+            if len(df) > 0:
+                last_candle_start = df.iloc[-1]['datetime']
+                interval_minutes = config['resample_minutes']
+                candle_end = last_candle_start + timedelta(minutes=interval_minutes)
+                current_time = now.replace(tzinfo=None)
+                if candle_end > current_time:
+                    df = df.iloc[:-1]
+
+            # FIX: Proper date filtering using timezone-aware comparison
+            df['dt_aware'] = pd.to_datetime(df['datetime']).dt.tz_localize(IST)
+            today = now.date()
+            today_df = df[df['dt_aware'].dt.date == today]
+
             if len(today_df) == 0:
                 today_df = df.tail(20)
 
@@ -523,7 +534,6 @@ def generate_signals():
     existing_ids = {s['_id'] for s in signals}
     for s in existing:
         if s['_id'] not in existing_ids:
-            # Keep old signals from today
             sig_date = s.get('scan_date','')[:10]
             today_str = datetime.now(IST).strftime('%Y-%m-%d')
             if sig_date == today_str:
@@ -531,6 +541,7 @@ def generate_signals():
 
     signals.sort(key=lambda x: x.get('scan_date', ''), reverse=True)
     return signals
+
 
 
 def generate_option_signals(futures_signals):
