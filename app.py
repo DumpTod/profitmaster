@@ -566,6 +566,7 @@ def generate_signals():
         })
 
     return option_signals
+    def generate_option_signals(futures_signals):
 
 
 def get_scanner_status():
