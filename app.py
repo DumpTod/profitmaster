@@ -76,13 +76,22 @@ options_cache = {
 # EXPIRY LOGIC
 # ========================================
 TRADING_HOLIDAYS = {
-    date(2024,1,26), date(2024,3,25), date(2024,4,14), date(2024,4,17),
-    date(2024,5,1),  date(2024,6,17), date(2024,8,15), date(2024,10,2),
-    date(2024,10,24),date(2024,11,1), date(2024,11,15),date(2024,12,25),
-    date(2025,1,26), date(2025,2,26), date(2025,3,14), date(2025,3,31),
-    date(2025,4,10), date(2025,4,14), date(2025,4,18), date(2025,5,1),
-    date(2025,8,15), date(2025,10,2), date(2025,10,23),date(2025,12,25),
-    date(2026,1,26), date(2026,3,25),
+    # 2026 NSE HOLIDAY CALENDAR - EXACT
+    date(2026,1,26),  # Republic Day
+    date(2026,3,3),   # Holi
+    date(2026,3,26),  # Shri Ram Navami
+    date(2026,3,31),  # Shri Mahavir Jayanti
+    date(2026,4,3),   # Good Friday
+    date(2026,4,14),  # Dr. Baba Saheb Ambedkar Jayanti
+    date(2026,5,1),   # Maharashtra Day
+    date(2026,5,28),  # Bakri Id
+    date(2026,6,26),  # Muharram
+    date(2026,9,14),  # Ganesh Chaturthi
+    date(2026,10,2),  # Mahatma Gandhi Jayanti
+    date(2026,10,20), # Dussehra
+    date(2026,11,10), # Diwali-Balipratipada
+    date(2026,11,24), # Prakash Gurpurb Sri Guru Nanak Dev
+    date(2026,12,25), # Christmas
 }
 
 def is_trading_day(d):
