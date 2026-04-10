@@ -441,8 +441,8 @@ def generate_signals():
                 last_candle_start = df.iloc[-1]['datetime']
                 interval_minutes = config['resample_minutes']
                 candle_end = last_candle_start + timedelta(minutes=interval_minutes)
-                current_time = now.replace(tzinfo=None)
-                if candle_end > current_time:
+                current_time = now.replace(tzinfo=None)  # Both should be timezone-naive
+                if current_time < candle_end:  # Fix comparison operator
                     df = df.iloc[:-1]
 
             # FIX: Proper date filtering using timezone-aware comparison
