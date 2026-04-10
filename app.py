@@ -500,8 +500,9 @@ def generate_signals():
                 else:                   grade, grade_score = 'C',  55
 
                 signal_time = pd.to_datetime(row['datetime'])
-                if signal_time.tzinfo is None:
-                    signal_time = signal_time.tz_localize(IST)
+                if isinstance(signal_time, pd.Timestamp):
+                    signal_time = signal_time.tz_localize(None)  # Strip timezone
+                    signal_time = IST.localize(signal_time)  # Re-add IST
                 else:
                     signal_time = signal_time.tz_convert(IST)
 
