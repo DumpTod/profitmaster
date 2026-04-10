@@ -16,7 +16,7 @@ CORS(app)
 app.secret_key = os.environ.get('FLASK_SECRET', 'atr-scanner-secret-key-2024')
 
 # ========================================
-# 🔑 FILL YOUR UPSTOX CREDENTIALS
+# 🔑 UPSTOX CREDENTIALS
 # ========================================
 API_KEY    = os.environ.get('API_KEY',    'dd06178d-b9a1-4854-b9fc-1bde72620f86')
 API_SECRET = os.environ.get('API_SECRET', 'un701txcrg')
@@ -73,10 +73,9 @@ options_cache = {
 }
 
 # ========================================
-# EXPIRY LOGIC
+# EXPIRY LOGIC - 2026 NSE HOLIDAYS
 # ========================================
 TRADING_HOLIDAYS = {
-    # 2026 NSE HOLIDAY CALENDAR - EXACT
     date(2026,1,26),  # Republic Day
     date(2026,3,3),   # Holi
     date(2026,3,26),  # Shri Ram Navami
@@ -141,6 +140,7 @@ def save_token(access_token):
     token_data['token_time'] = datetime.now(IST).isoformat()
     with open('/tmp/token.json', 'w') as f:
         json.dump(token_data, f)
+    print(f"✓ Token saved at {datetime.now(IST).strftime('%H:%M:%S')}")
 
 def load_token():
     try:
@@ -148,8 +148,9 @@ def load_token():
             data = json.load(f)
             token_data['access_token'] = data.get('access_token')
             token_data['token_time']   = data.get('token_time')
+        print(f"✓ Token loaded")
     except:
-        pass
+        print(f"✗ No saved token found")
 
 load_token()
 
@@ -222,213 +223,184 @@ def calculate_atr_trailing(df, fast_period, fast_mult, slow_period, slow_mult):
     if n < max(fast_period, slow_period) + 5:
         return df
 
-    tr = np.zeros(n)
+    # True Range
+    tr = np.empty(n)
     tr[0] = high[0] - low[0]
     for i in range(1, n):
-        tr[i] = max(high[i]-low[i], abs(high[i]-close[i-1]), abs(low[i]-close[i-1]))
+        tr[i] = max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
 
-    def wilder_rma(arr, period):
+    # RMA function
+    def rma(arr, period):
+        alpha = 1.0 / period
         a = np.zeros(n)
-        if n >= period:
-            a[period-1] = np.mean(arr[:period])
-            for i in range(period, n):
-                a[i] = (a[i-1]*(period-1) + arr[i]) / period
+        if n < period:
+            return a
+        a[period-1] = arr[:period].mean()
+        for i in range(period, n):
+            a[i] = (a[i-1] * (period - 1) + arr[i]) / period
         return a
 
-    fast_sl = fast_mult * wilder_rma(tr, fast_period)
-    slow_sl = slow_mult * wilder_rma(tr, slow_period)
+    fast_atr = rma(tr, fast_period) * fast_mult
+    slow_atr = rma(tr, slow_period) * slow_mult
 
+    # Trailing stop function
     def trail(atr_sl):
         t = np.zeros(n)
         for i in range(1, n):
-            sc, pt, ps = close[i], t[i-1], close[i-1]
-            if   sc > pt and ps > pt: t[i] = max(pt, sc - atr_sl[i])
-            elif sc < pt and ps < pt: t[i] = min(pt, sc + atr_sl[i])
-            elif sc > pt:             t[i] = sc - atr_sl[i]
-            else:                     t[i] = sc + atr_sl[i]
+            sc = close[i]
+            pt = t[i-1]
+            ps = close[i-1]
+            if sc > pt and ps > pt:
+                t[i] = max(pt, sc - atr_sl[i])
+            elif sc < pt and ps < pt:
+                t[i] = min(pt, sc + atr_sl[i])
+            elif sc > pt:
+                t[i] = sc - atr_sl[i]
+            else:
+                t[i] = sc + atr_sl[i]
         return t
 
-    trail1 = trail(fast_sl)
-    trail2 = trail(slow_sl)
+    trail1 = trail(fast_atr)
+    trail2 = trail(slow_atr)
 
     df['trail1']   = trail1
     df['trail2']   = trail2
-    df['fast_atr'] = wilder_rma(tr, fast_period)
-    df['slow_atr'] = wilder_rma(tr, slow_period)
+    df['fast_atr'] = fast_atr / fast_mult
+    df['slow_atr'] = slow_atr / slow_mult
 
-    df['buy_signal']  = False
-    df['sell_signal'] = False
+    # Generate signals
+    buy  = np.zeros(n, bool)
+    sell = np.zeros(n, bool)
     for i in range(1, n):
         if trail1[i] > trail2[i] and trail1[i-1] <= trail2[i-1]:
-            df.iloc[i, df.columns.get_loc('buy_signal')]  = True
+            buy[i] = True
         if trail1[i] < trail2[i] and trail1[i-1] >= trail2[i-1]:
-            df.iloc[i, df.columns.get_loc('sell_signal')] = True
+            sell[i] = True
 
-    df['bar_color'] = 'neutral'
+    df['buy_signal']  = buy
+    df['sell_signal'] = sell
+
+    # Bar color
+    bar_color = []
     for i in range(n):
-        if trail1[i] > trail2[i] and close[i] > trail2[i] and low[i]  > trail2[i]: df.iloc[i, df.columns.get_loc('bar_color')] = 'green'
-        elif trail1[i] > trail2[i] and close[i] > trail2[i] and low[i]  < trail2[i]: df.iloc[i, df.columns.get_loc('bar_color')] = 'blue'
-        elif trail2[i] > trail1[i] and close[i] < trail2[i] and high[i] < trail2[i]: df.iloc[i, df.columns.get_loc('bar_color')] = 'red'
-        elif trail2[i] > trail1[i] and close[i] < trail2[i] and high[i] > trail2[i]: df.iloc[i, df.columns.get_loc('bar_color')] = 'yellow'
+        if trail1[i] > trail2[i] and close[i] > trail2[i] and low[i] > trail2[i]:
+            bar_color.append('green')
+        elif trail1[i] > trail2[i] and close[i] > trail2[i] and low[i] < trail2[i]:
+            bar_color.append('blue')
+        elif trail2[i] > trail1[i] and close[i] < trail2[i] and high[i] < trail2[i]:
+            bar_color.append('red')
+        elif trail2[i] > trail1[i] and close[i] < trail2[i] and high[i] > trail2[i]:
+            bar_color.append('yellow')
+        else:
+            bar_color.append('neutral')
 
-    df['regime'] = np.where(trail1 > trail2, 'BULL', 'BEAR')
+    df['bar_color'] = bar_color
+    df['regime']    = np.where(trail1 > trail2, 'BULL', 'BEAR')
     return df
 
 
 # ========================================
 # DATA FETCHING
 # ========================================
-def fetch_candles(instrument_key, interval='1minute', days=2):
+def fetch_candles(instrument_key, timeframe='1minute', days=5):
     headers = get_headers()
     if not headers:
         return pd.DataFrame()
 
-    encoded  = quote(instrument_key, safe='')
-    end_date = datetime.now(IST)
-    # Single API call — just today and yesterday, enough for intraday signals
+    end_date   = datetime.now(IST)
     start_date = end_date - timedelta(days=days)
-    url = (
-        f"https://api.upstox.com/v2/historical-candle/{encoded}"
-        f"/{interval}"
-        f"/{end_date.strftime('%Y-%m-%d')}"
-        f"/{start_date.strftime('%Y-%m-%d')}"
-    )
+
+    url = 'https://api.upstox.com/v2/historical-candle/intraday'
+    params = {
+        'instrument_key': instrument_key,
+        'interval':       timeframe,
+        'from_date':      start_date.strftime('%Y-%m-%d'),
+        'to_date':        end_date.strftime('%Y-%m-%d')
+    }
+
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=headers, params=params)
         if r.status_code != 200:
+            print(f"✗ Fetch failed for {instrument_key}: {r.status_code}")
             return pd.DataFrame()
-        candles = r.json().get('data', {}).get('candles', [])
+
+        data = r.json().get('data', {})
+        candles = data.get('candles', [])
         if not candles:
+            print(f"✗ No candles for {instrument_key}")
             return pd.DataFrame()
-        rows = [{'datetime': c[0], 'open': c[1], 'high': c[2],
-                 'low': c[3], 'close': c[4], 'volume': c[5]} for c in candles]
+
+        rows = []
+        for c in candles:
+            # c = [timestamp_str, open, high, low, close, volume, oi]
+            dt = pd.to_datetime(c[0])
+            if dt.tzinfo is not None:
+                dt = dt.tz_convert(IST).tz_localize(None)
+            rows.append({
+                'datetime': dt,
+                'open':     float(c[1]),
+                'high':     float(c[2]),
+                'low':      float(c[3]),
+                'close':    float(c[4]),
+                'volume':   int(c[5])
+            })
+
         df = pd.DataFrame(rows)
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        df = df.sort_values('datetime').drop_duplicates(subset='datetime').reset_index(drop=True)
+        df = df.sort_values('datetime').drop_duplicates('datetime').reset_index(drop=True)
+        
+        # Filter market hours only
         df['time_val'] = df['datetime'].dt.hour * 100 + df['datetime'].dt.minute
-        df = df[(df['time_val'] >= 915) & (df['time_val'] <= 1530)].drop(columns=['time_val'])
-        return df.reset_index(drop=True)
+        df = df[(df['time_val'] >= 915) & (df['time_val'] <= 1530)].copy()
+        df = df.drop('time_val', axis=1).reset_index(drop=True)
+        
+        print(f"✓ Fetched {len(df)} candles for {instrument_key}")
+        return df
+
     except Exception as e:
-        print(f"Fetch error: {e}")
+        print(f"✗ Fetch error for {instrument_key}: {e}")
         return pd.DataFrame()
 
 
 def resample_candles(df_1m, minutes):
     if len(df_1m) == 0:
         return pd.DataFrame()
-    df = df_1m.copy()
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    df = df.set_index('datetime')
-    resampled = df.resample(f'{minutes}min').agg(
-        open=('open','first'), high=('high','max'),
-        low=('low','min'), close=('close','last'), volume=('volume','sum')
-    ).dropna().reset_index()
+    
+    df = df_1m.copy().set_index('datetime')
+    resampled = df.resample(f'{minutes}min').agg({
+        'open':   'first',
+        'high':   'max',
+        'low':    'min',
+        'close':  'last',
+        'volume': 'sum'
+    }).dropna().reset_index()
+    
+    # Filter market hours
     resampled['time_val'] = resampled['datetime'].dt.hour * 100 + resampled['datetime'].dt.minute
-    resampled = resampled[(resampled['time_val'] >= 915) & (resampled['time_val'] <= 1530)]
-    return resampled.drop(columns=['time_val']).reset_index(drop=True)
+    resampled = resampled[(resampled['time_val'] >= 915) & (resampled['time_val'] <= 1530)].copy()
+    resampled = resampled.drop('time_val', axis=1).reset_index(drop=True)
+    
+    return resampled
 
 
 # ========================================
-# OPTIONS DATA FETCHING
-# ========================================
-_option_contracts_cache = {}
-
-def get_option_contracts_live(symbol, expiry_date_str):
-    """Fetch live (non-expired) option contracts for a given expiry."""
-    cache_key = (symbol, expiry_date_str)
-    if cache_key in _option_contracts_cache:
-        return _option_contracts_cache[cache_key]
-
-    headers = get_headers()
-    if not headers:
-        return {}
-
-    config         = SCANNER_CONFIG.get(symbol, {})
-    instrument_key = config.get('options_key', '')
-    url    = 'https://api.upstox.com/v2/option/chain'
-    params = {'instrument_key': instrument_key, 'expiry_date': expiry_date_str}
-
-    try:
-        r = requests.get(url, headers=headers, params=params)
-        if r.status_code == 200:
-            data    = r.json().get('data', [])
-            result  = {}
-            for item in data:
-                strike = item.get('strike_price')
-                for otype, itype in [('call_options','CE'), ('put_options','PE')]:
-                    opt = item.get(otype) or {}
-                    if not opt:
-                        continue
-                    # Confirmed Upstox structure:
-                    # call_options.instrument_key  (top-level)
-                    # call_options.market_data.ltp (nested under market_data)
-                    ikey        = opt.get('instrument_key', '')
-                    market_data = opt.get('market_data') or {}
-                    ltp_val   = float(market_data.get('ltp') or 0)
-                    close_val = float(market_data.get('close_price') or 0)
-                    ltp       = ltp_val if ltp_val > 0 else close_val
-                    if strike and ikey:
-                        result[(float(strike), itype)] = {'key': ikey, 'ltp': ltp}
-            _option_contracts_cache[cache_key] = result
-            return result
-        else:
-            print(f"Option chain error {r.status_code}: {r.text[:200]}")
-            return {}
-    except Exception as e:
-        print(f"Option chain exception: {e}")
-        return {}
-
-
-def get_option_ltp(symbol, spot_price, option_type, expiry_date_str, otm=False):
-    """
-    Returns (ltp, strike, instrument_key) for ATM or 1-OTM strike.
-    Uses live option chain API.
-    """
-    config = SCANNER_CONFIG.get(symbol, {})
-    step   = config.get('strike_step', 50)
-
-    atm    = round_to_strike(spot_price, step)
-    if otm:
-        strike = atm + step if option_type == 'CE' else atm - step
-    else:
-        strike = atm
-
-    contracts = get_option_contracts_live(symbol, expiry_date_str)
-    if not contracts:
-        return None, strike, None
-
-    atm_strike = round_to_strike(spot_price, step)
-    entry = contracts.get((float(strike), option_type))
-    if not entry:
-        candidates = [(s, t) for (s, t) in contracts if t == option_type]
-        if otm:
-            candidates = [(s, t) for (s, t) in candidates if s != float(atm_strike)]
-        if not candidates:
-            return None, strike, None
-        closest = min(candidates, key=lambda x: abs(x[0] - strike))
-        strike  = closest[0]
-        entry   = contracts[(closest[0], option_type)]
-
-    return entry.get('ltp'), strike, entry.get('key')
-
-
-# ========================================
-# SIGNAL GENERATION
+# SIGNAL GENERATION - TIMEZONE FIXED
 # ========================================
 def generate_signals():
     now     = datetime.now(IST)
     signals = []
-    print(f"🔍 SCAN START: {now.strftime('%Y-%m-%d %H:%M:%S')} | Token: {'✓' if token_data['access_token'] else '✗'}")
+
+    print(f"\n🔍 SCAN: {now.strftime('%Y-%m-%d %H:%M:%S')} | Token: {'✓' if token_data['access_token'] else '✗'}")
+
     for symbol, config in SCANNER_CONFIG.items():
         try:
             df_1m = fetch_candles(config['instrument_key'], '1minute', days=5)
-            print(f"  {symbol}: {len(df_1m)} candles | Last close: {df_1m.iloc[-1]['close'] if len(df_1m) > 0 else 'N/A'}")
-            print(f"  {symbol}: {len(df_1m)} candles fetched")
             if len(df_1m) < 50:
+                print(f"  {symbol}: Insufficient data ({len(df_1m)} candles)")
                 continue
 
             df = resample_candles(df_1m, config['resample_minutes'])
             if len(df) < max(config['fast_period'], config['slow_period']) + 10:
+                print(f"  {symbol}: Insufficient resampled data ({len(df)} candles)")
                 continue
 
             df = calculate_atr_trailing(
@@ -436,32 +408,30 @@ def generate_signals():
                 config['slow_period'], config['slow_mult']
             )
 
-            # Remove incomplete candle and filter for today
+            # Remove last incomplete candle
             if len(df) > 0:
-                df = df.iloc[:-1]  # Always remove last candle (incomplete)
+                df = df.iloc[:-1].copy()
             
+            # Filter today's signals only
             today = now.date()
             df['date'] = pd.to_datetime(df['datetime']).dt.date
-            today_df = df[df['date'] == today]
-
-            # FIX: Proper date filtering using timezone-aware comparison
-            df['dt_aware'] = pd.to_datetime(df['datetime']).dt.tz_localize(IST)
-            today = now.date()
-            today_df = df[df['dt_aware'].dt.date == today]
+            today_df = df[df['date'] == today].copy()
 
             if len(today_df) == 0:
-                today_df = df.tail(20)
+                print(f"  {symbol}: No candles for today, using tail(20)")
+                today_df = df.tail(20).copy()
 
+            signal_count = 0
             for idx, row in today_df.iterrows():
                 if not (row.get('buy_signal', False) or row.get('sell_signal', False)):
                     continue
 
                 direction     = 'BUY-LONG' if row['buy_signal'] else 'SELL-SHORT'
-                entry         = round(row['close'], 2)
-                trail2        = round(row['trail2'], 2)
-                trail1        = round(row['trail1'], 2)
-                fast_atr_val  = round(row['fast_atr'], 2)
-                slow_atr_val  = round(row['slow_atr'], 2)
+                entry         = round(float(row['close']), 2)
+                trail2        = round(float(row['trail2']), 2)
+                trail1        = round(float(row['trail1']), 2)
+                fast_atr_val  = round(float(row['fast_atr']), 2)
+                slow_atr_val  = round(float(row['slow_atr']), 2)
 
                 if direction == 'BUY-LONG':
                     sl       = trail2
@@ -499,12 +469,12 @@ def generate_signals():
                 elif confidence >= 0.6: grade, grade_score = 'B',  70
                 else:                   grade, grade_score = 'C',  55
 
+                # TIMEZONE FIX: Convert to naive datetime, then localize to IST
                 signal_time = pd.to_datetime(row['datetime'])
                 if isinstance(signal_time, pd.Timestamp):
-                    signal_time = signal_time.tz_localize(None)  # Strip timezone
-                    signal_time = IST.localize(signal_time)  # Re-add IST
-                else:
-                    signal_time = signal_time.tz_convert(IST)
+                    if signal_time.tzinfo is not None:
+                        signal_time = signal_time.tz_localize(None)
+                    signal_time = IST.localize(signal_time)
 
                 signals.append({
                     '_id':          f"{symbol}_{signal_time.strftime('%Y%m%d_%H%M')}",
@@ -533,100 +503,160 @@ def generate_signals():
                     'scanner_type': 'atr_trailing',
                     'outcome':      'pending'
                 })
+                signal_count += 1
+                print(f"  ✓ {symbol} {direction} @ {signal_time.strftime('%H:%M')} | Entry: {entry} | Grade: {grade}")
+
+            if signal_count == 0:
+                print(f"  {symbol}: No signals found")
 
         except Exception as e:
-            print(f"Error scanning {symbol}: {e}")
+            print(f"✗ Error scanning {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
     signals.sort(key=lambda x: x.get('scan_date', ''), reverse=True)
 
-    # Merge with previously cached signals from today so none are lost
+    # Merge with previously cached signals from today
     existing = scan_cache.get('signals', [])
     existing_ids = {s['_id'] for s in signals}
+    today_str = datetime.now(IST).strftime('%Y-%m-%d')
     for s in existing:
-        if s['_id'] not in existing_ids:
-            sig_date = s.get('scan_date','')[:10]
-            today_str = datetime.now(IST).strftime('%Y-%m-%d')
-            if sig_date == today_str:
-                signals.append(s)
+        if s['_id'] not in existing_ids and s.get('scan_date','')[:10] == today_str:
+            signals.append(s)
 
     signals.sort(key=lambda x: x.get('scan_date', ''), reverse=True)
+    print(f"✓ Total signals: {len(signals)}\n")
     return signals
 
 
+# ========================================
+# OPTION CHAIN - CACHE
+# ========================================
+_option_contracts_cache = {}
+
+def fetch_option_contracts(symbol, expiry_date):
+    """Fetch option chain from Upstox and cache."""
+    cache_key = f"{symbol}_{expiry_date}"
+    if cache_key in _option_contracts_cache:
+        return _option_contracts_cache[cache_key]
+
+    headers = get_headers()
+    if not headers:
+        return {}
+
+    config = SCANNER_CONFIG.get(symbol, {})
+    url = 'https://api.upstox.com/v2/option/chain'
+    params = {
+        'instrument_key': config.get('options_key', ''),
+        'expiry_date':    expiry_date.strftime('%Y-%m-%d')
+    }
+
+    try:
+        r = requests.get(url, headers=headers, params=params)
+        if r.status_code != 200:
+            return {}
+
+        data = r.json().get('data', [])
+        contracts = {}
+        for item in data:
+            strike = item.get('strike_price')
+            ce = item.get('call_options', {})
+            pe = item.get('put_options', {})
+            if ce:
+                contracts[(float(strike), 'CE')] = {
+                    'ltp': ce.get('market_data', {}).get('ltp', 0),
+                    'key': ce.get('instrument_key', '')
+                }
+            if pe:
+                contracts[(float(strike), 'PE')] = {
+                    'ltp': pe.get('market_data', {}).get('ltp', 0),
+                    'key': pe.get('instrument_key', '')
+                }
+
+        _option_contracts_cache[cache_key] = contracts
+        return contracts
+
+    except Exception as e:
+        print(f"Option chain fetch error: {e}")
+        return {}
+
+
+def get_option_ltp(symbol, spot_price, option_type, expiry_date, otm=False):
+    """Find option strike and LTP. Returns (ltp, strike, key)."""
+    contracts = fetch_option_contracts(symbol, expiry_date)
+    if not contracts:
+        return None, None, None
+
+    config = SCANNER_CONFIG.get(symbol, {})
+    step = config.get('strike_step', 50)
+    strike = spot_price
+
+    atm_strike = round_to_strike(spot_price, step)
+    entry = contracts.get((float(strike), option_type))
+    if not entry:
+        candidates = [(s, t) for (s, t) in contracts if t == option_type]
+        if otm:
+            candidates = [(s, t) for (s, t) in candidates if s != float(atm_strike)]
+        if not candidates:
+            return None, strike, None
+        closest = min(candidates, key=lambda x: abs(x[0] - strike))
+        strike  = closest[0]
+        entry   = contracts[(closest[0], option_type)]
+
+    return entry.get('ltp'), strike, entry.get('key')
+
 
 def generate_option_signals(futures_signals):
-    """
-    For each futures signal, fetch ATM + OTM option LTP and build option signal card.
-    """
-    now            = datetime.now(IST)
-    today          = now.date()
-    option_signals = []
+    """For each futures signal, fetch ATM + OTM option LTP."""
+    now = datetime.now(IST)
+    results = []
 
     for sig in futures_signals:
-        symbol    = sig.get('symbol', '')
-        config    = SCANNER_CONFIG.get(symbol)
+        symbol = sig.get('symbol', '')
+        config = SCANNER_CONFIG.get(symbol)
         if not config:
             continue
 
-        direction   = sig.get('direction', '')
-        opt_type    = 'CE' if direction == 'BUY-LONG' else 'PE'
-        spot        = float(sig.get('entry', 0))
-        step        = config.get('strike_step', 50)
-        lot         = config.get('lot_size', 1)
-        expiry      = get_active_expiry(symbol, today)
-        expiry_str  = expiry.strftime('%Y-%m-%d')
-        expiry_disp = expiry.strftime('%d %b %Y')
-        days_to_exp = (expiry - today).days
+        direction  = sig.get('direction', '')
+        opt_type   = 'CE' if direction == 'BUY-LONG' else 'PE'
+        spot       = float(sig.get('entry', 0))
+        tp1        = float(sig.get('target_1', 0))
+        lot        = config['lot_size']
+        expiry     = get_active_expiry(symbol, now.date())
+        days_left  = (expiry - now.date()).days
 
-        atm_strike = round_to_strike(spot, step)
-        otm_strike = (atm_strike + step) if opt_type == 'CE' else (atm_strike - step)
+        ltp_atm, strike_atm, key_atm = get_option_ltp(symbol, tp1, opt_type, expiry, otm=False)
+        ltp_otm, strike_otm, key_otm = get_option_ltp(symbol, tp1, opt_type, expiry, otm=True)
 
-        atm_ltp, atm_s, atm_key = get_option_ltp(symbol, spot, opt_type, expiry_str, otm=False)
-        otm_ltp, otm_s, otm_key = get_option_ltp(symbol, spot, opt_type, expiry_str, otm=True)
-
-        # Estimated P&L: use SL/target from futures signal scaled to option premium
-        # ATM: target ×2 premium, SL = −50% premium
-        atm_pnl_target = round(atm_ltp * 2.0 * lot, 0) if atm_ltp else None
-        atm_pnl_sl     = round(atm_ltp * 0.5 * lot * -1, 0) if atm_ltp else None
-        otm_pnl_target = round(otm_ltp * 2.5 * lot, 0) if otm_ltp else None
-        otm_pnl_sl     = round(otm_ltp * 0.5 * lot * -1, 0) if otm_ltp else None
-
-        option_signals.append({
-            '_id':           sig.get('_id', '') + '_OPT',
-            'futures_id':    sig.get('_id', ''),
+        results.append({
+            '_id':           sig['_id'] + '_OPT',
+            'futures_id':    sig['_id'],
             'symbol':        symbol,
             'direction':     direction,
             'opt_type':      opt_type,
+            'action':        'BUY ' + opt_type,
             'spot':          spot,
-            'expiry':        expiry_str,
-            'expiry_display':expiry_disp,
-            'days_to_expiry':days_to_exp,
+            'tp1':           tp1,
+            'atm_strike':    strike_atm,
+            'atm_ltp':       round(ltp_atm, 2) if ltp_atm else None,
+            'atm_key':       key_atm,
+            'otm_strike':    strike_otm,
+            'otm_ltp':       round(ltp_otm, 2) if ltp_otm else None,
+            'otm_key':       key_otm,
+            'expiry':        expiry.strftime('%d %b %Y'),
+            'days_to_expiry':days_left,
+            'lot_size':      lot,
+            'max_risk_atm':  round(ltp_atm * lot, 0) if ltp_atm else None,
+            'max_risk_otm':  round(ltp_otm * lot, 0) if ltp_otm else None,
             'scan_date':     sig.get('scan_date', ''),
             'scan_time':     sig.get('scan_time', ''),
             'grade':         sig.get('grade', ''),
             'grade_score':   sig.get('grade_score', 0),
             'confidence':    sig.get('confidence', 0),
-            'lot_size':      lot,
-            'atm': {
-                'strike':     atm_s,
-                'ltp':        round(atm_ltp, 2) if atm_ltp else None,
-                'instrument': atm_key,
-                'pnl_target': atm_pnl_target,
-                'pnl_sl':     atm_pnl_sl,
-                'max_risk':   round(atm_ltp * lot, 0) if atm_ltp else None,
-            },
-            'otm': {
-                'strike':     otm_s,
-                'ltp':        round(otm_ltp, 2) if otm_ltp else None,
-                'instrument': otm_key,
-                'pnl_target': otm_pnl_target,
-                'pnl_sl':     otm_pnl_sl,
-                'max_risk':   round(otm_ltp * lot, 0) if otm_ltp else None,
-            }
         })
 
-    return option_signals
+    return results
 
 
 def get_scanner_status():
@@ -634,10 +664,13 @@ def get_scanner_status():
     hour     = now.hour
     minute   = now.minute
     day      = now.weekday()
+    today    = now.date()
 
     if not token_data['access_token']:
         return 'NO_TOKEN'
     if day >= 5:
+        return 'MARKET_CLOSED'
+    if today in TRADING_HOLIDAYS:
         return 'MARKET_CLOSED'
 
     time_val = hour * 100 + minute
@@ -698,7 +731,8 @@ def api_signals():
             'signals':        scan_cache['signals'],
             'last_scan':      scan_cache['last_scan'].isoformat(),
             'daily_trades':   scan_cache.get('daily_trades', {}),
-            'timestamp':      now.isoformat()
+            'timestamp':      now.isoformat(),
+            'cached':         True
         })
 
     signals = generate_signals() if status in ['ACTIVE', 'SCANNING', 'PRE_MARKET'] else scan_cache.get('signals', [])
@@ -711,16 +745,14 @@ def api_signals():
         'signals':        signals,
         'last_scan':      now.isoformat(),
         'daily_trades':   scan_cache.get('daily_trades', {}),
-        'timestamp':      now.isoformat()
+        'timestamp':      now.isoformat(),
+        'cached':         False
     })
 
 
 @app.route('/api/option-signals')
 def api_option_signals():
-    """
-    Returns ATM + OTM option data for each active futures signal.
-    Cached for 5 minutes.
-    """
+    """Returns ATM + OTM option data for each active futures signal."""
     now    = datetime.now(IST)
     status = get_scanner_status()
 
@@ -728,7 +760,6 @@ def api_option_signals():
         return jsonify({'status': 'success', 'scanner_status': 'NO_TOKEN',
                         'option_signals': [], 'timestamp': now.isoformat()})
 
-    # Use cached option signals if fresh (2 min only)
     if (options_cache['last_fetch'] and
             (now - options_cache['last_fetch']).total_seconds() < 120):
         return jsonify({
@@ -736,13 +767,13 @@ def api_option_signals():
             'scanner_status': status,
             'option_signals': options_cache['signals'],
             'last_fetch':     options_cache['last_fetch'].isoformat(),
-            'timestamp':      now.isoformat()
+            'timestamp':      now.isoformat(),
+            'cached':         True
         })
 
     # Always clear contract cache to get fresh LTPs
     _option_contracts_cache.clear()
 
-    # Get latest futures signals (always fresh)
     futures = generate_signals()
     scan_cache['signals']   = futures
     scan_cache['last_scan'] = now
@@ -756,7 +787,8 @@ def api_option_signals():
         'scanner_status': status,
         'option_signals': opt_signals,
         'last_fetch':     now.isoformat(),
-        'timestamp':      now.isoformat()
+        'timestamp':      now.isoformat(),
+        'cached':         False
     })
 
 
@@ -775,7 +807,6 @@ def api_track():
             config    = SCANNER_CONFIG.get(symbol)
             entry     = float(sig.get('entry', 0))
             sl        = float(sig.get('sl', 0))
-            t1        = float(sig.get('target_1', sig.get('target', 0)))
             t2        = float(sig.get('target_2', sig.get('target', 0)))
             direction = sig.get('direction', '')
             scan_date = sig.get('scan_date', '')
@@ -796,7 +827,10 @@ def api_track():
                                      'live_pnl_pct': 0, 'track_status': 'no_candles_fetched'})
                     continue
 
-                df_1m['datetime'] = pd.to_datetime(df_1m['datetime']).dt.tz_localize(None)
+                df_1m['datetime'] = pd.to_datetime(df_1m['datetime'])
+                if df_1m['datetime'].dt.tz is not None:
+                    df_1m['datetime'] = df_1m['datetime'].dt.tz_localize(None)
+                    
                 df_after = df_1m[df_1m['datetime'] > signal_time].reset_index(drop=True)
 
                 if len(df_after) == 0:
@@ -847,6 +881,7 @@ def api_track():
                 })
 
             except Exception as e:
+                print(f"Track error: {e}")
                 results.append({'_id': sig.get('_id'), 'status': 'pending',
                                  'exit_price': None, 'current_price': None,
                                  'live_pnl_pct': 0, 'track_status': f'error:{str(e)}'})
@@ -858,25 +893,13 @@ def api_track():
         return jsonify({'status': 'error', 'message': str(e)})
 
 
-
-@app.route('/api/debug-option-chain')
-def debug_option_chain():
-    """Debug endpoint to see raw option chain response structure."""
-    headers = get_headers()
-    if not headers:
-        return jsonify({'error': 'no token'})
-    today   = datetime.now(IST).date()
-    expiry  = get_active_expiry('BANKNIFTY', today)
-    url     = 'https://api.upstox.com/v2/option/chain'
-    params  = {'instrument_key': 'NSE_INDEX|Nifty Bank', 'expiry_date': expiry.strftime('%Y-%m-%d')}
-    r       = requests.get(url, headers=headers, params=params)
-    if r.status_code == 200:
-        data = r.json().get('data', [])
-        # Return first 2 items raw so we can inspect structure
-        return jsonify({'status': 'ok', 'expiry': str(expiry), 'sample': data[:2]})
-    return jsonify({'error': r.text[:500]})
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting on port {port}")
+    print(f"\n{'='*60}")
+    print(f"🚀 PROFITMASTER UPSTOX SCANNER")
+    print(f"{'='*60}")
+    print(f"Port: {port}")
+    print(f"Token: {'✓ Active' if token_data['access_token'] else '✗ Not Set'}")
+    print(f"Time: {datetime.now(IST).strftime('%d %b %Y %H:%M:%S IST')}")
+    print(f"{'='*60}\n")
     app.run(host='0.0.0.0', port=port, debug=False)
