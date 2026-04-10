@@ -436,14 +436,13 @@ def generate_signals():
                 config['slow_period'], config['slow_mult']
             )
 
-            # FIX: Remove incomplete candle (current candle that hasn't closed yet)
+            # Remove incomplete candle and filter for today
             if len(df) > 0:
-                last_candle_start = df.iloc[-1]['datetime']
-                interval_minutes = config['resample_minutes']
-                candle_end = last_candle_start + timedelta(minutes=interval_minutes)
-                current_time = now.replace(tzinfo=None)  # Both should be timezone-naive
-                if current_time < candle_end:  # Fix comparison operator
-                    df = df.iloc[:-1]
+                df = df.iloc[:-1]  # Always remove last candle (incomplete)
+            
+            today = now.date()
+            df['date'] = pd.to_datetime(df['datetime']).dt.date
+            today_df = df[df['date'] == today]
 
             # FIX: Proper date filtering using timezone-aware comparison
             df['dt_aware'] = pd.to_datetime(df['datetime']).dt.tz_localize(IST)
