@@ -418,10 +418,11 @@ def get_option_ltp(symbol, spot_price, option_type, expiry_date_str, otm=False):
 def generate_signals():
     now     = datetime.now(IST)
     signals = []
-
+    print(f"🔍 SCAN START: {now.strftime('%Y-%m-%d %H:%M:%S')} | Token: {'✓' if token_data['access_token'] else '✗'}")
     for symbol, config in SCANNER_CONFIG.items():
         try:
             df_1m = fetch_candles(config['instrument_key'], '1minute', days=5)
+            print(f"  {symbol}: {len(df_1m)} candles fetched")
             if len(df_1m) < 50:
                 continue
 
