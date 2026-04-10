@@ -422,6 +422,7 @@ def generate_signals():
     for symbol, config in SCANNER_CONFIG.items():
         try:
             df_1m = fetch_candles(config['instrument_key'], '1minute', days=5)
+            print(f"  {symbol}: {len(df_1m)} candles | Last close: {df_1m.iloc[-1]['close'] if len(df_1m) > 0 else 'N/A'}")
             print(f"  {symbol}: {len(df_1m)} candles fetched")
             if len(df_1m) < 50:
                 continue
