@@ -891,7 +891,39 @@ def api_track():
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
+# Store latest signals in memory
+latest_signals = {
+    "NIFTY": {"status": "No Signal", "timestamp": None},
+    "BANKNIFTY": {"status": "No Signal", "timestamp": None},
+    "SENSEX": {"status": "No Signal", "timestamp": None}
+}
 
+# Endpoint to receive signals from n8n
+@app.route('/api/signals', methods=['POST'])
+def receive_signal():
+    try:
+        data = request.get_json()
+        instrument = data.get('instrument')
+        
+        if instrument in latest_signals:
+            latest_signals[instrument] = {
+                "status": data.get('status'),
+                "timestamp": data.get('timestamp'),
+                "entryPrice": data.get('entryPrice'),
+                "stopLoss": data.get('stopLoss'),
+                "target1": data.get('target1'),
+                "target2": data.get('target2')
+            }
+            return jsonify({"success": True, "message": f"{instrument} signal received"}), 200
+        else:
+            return jsonify({"success": False, "message": "Invalid instrument"}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# Endpoint for webpage to fetch signals
+@app.route('/api/signals', methods=['GET'])
+def get_signals():
+    return jsonify(latest_signals)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
