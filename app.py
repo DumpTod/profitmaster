@@ -891,6 +891,7 @@ def api_track():
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
+        
 # Store latest signals in memory
 latest_signals = {
     "NIFTY": {"status": "No Signal", "timestamp": None},
@@ -922,7 +923,7 @@ def receive_signal():
 
 # Endpoint for webpage to fetch signals
 @app.route('/api/live-signals', methods=['GET'])
-def get_signals():
+def get_live_signals():
     return jsonify(latest_signals)
 
 if __name__ == '__main__':
