@@ -899,7 +899,7 @@ latest_signals = {
 }
 
 # Endpoint to receive signals from n8n
-@app.route('/api/signals', methods=['POST'])
+@app.route('/api/live-signals', methods=['POST'])
 def receive_signal():
     try:
         data = request.get_json()
@@ -921,7 +921,7 @@ def receive_signal():
         return jsonify({"success": False, "error": str(e)}), 500
 
 # Endpoint for webpage to fetch signals
-@app.route('/api/signals', methods=['GET'])
+@app.route('/api/live-signals', methods=['GET'])
 def get_signals():
     return jsonify(latest_signals)
 
