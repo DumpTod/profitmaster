@@ -5,3 +5,4 @@ pytz==2024.1
 pandas==2.2.0
 numpy==1.26.4
 gunicorn==21.2.0
+requests==2.31.0
