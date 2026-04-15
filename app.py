@@ -933,7 +933,6 @@ if __name__ == '__main__':
     print(f"🚀 PROFITMASTER UPSTOX SCANNER")
     print(f"{'='*60}")
     print(f"Port: {port}")
-    print(f"Token: {'✓ Active' if token_data['access_token'] else '✗ Not Set'}")
     print(f"Time: {datetime.now(IST).strftime('%d %b %Y %H:%M:%S IST')}")
     print(f"{'='*60}\n")
     app.run(host='0.0.0.0', port=port, debug=False)
