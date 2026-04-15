@@ -928,7 +928,7 @@ def get_live_signals():
     return jsonify(latest_signals)
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 10000))
     print(f"\n{'='*60}")
     print(f"🚀 PROFITMASTER UPSTOX SCANNER")
     print(f"{'='*60}")
