@@ -51,15 +51,15 @@ function log(msg, cls){
 function getTrades(){
     try{
         var raw = localStorage.getItem('signalHistory');
-        if(!raw) return [];
+        if(!raw){ log('signalHistory key not found in localStorage', 'err'); return []; }
         var all = JSON.parse(raw);
-        // Filter only NIFTY and BANKNIFTY trades
-        return all.filter(function(s){
-            return s.symbol === 'NIFTY' || s.symbol === 'BANKNIFTY' ||
-                   s.symbol === 'NIFTY50' || s.scanner_type === 'atr_trailing';
-        });
+        log('Total trades in localStorage: ' + all.length, 'info');
+        var filtered = all.filter(function(s){ return s.scanner_type === 'atr_trailing'; });
+        log('atr_trailing trades: ' + filtered.length, 'info');
+        log('Sample symbols: ' + all.slice(0,3).map(function(s){ return s.symbol; }).join(', '), 'info');
+        return filtered;
     } catch(e){
-        log('Error reading localStorage: ' + e.message, 'err');
+        log('Error: ' + e.message, 'err');
         return [];
     }
 }
