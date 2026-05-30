@@ -49,13 +49,14 @@ function log(msg, cls){
 }
 
 function getTrades(){
-  try {
-    var raw = localStorage.getItem('signalHistory');
-    if(!raw) return [];
-    return JSON.parse(raw).filter(function(s){ 
-      return s.scanner_type === 'atr_trailing'; 
-    });
-  } catch(e){ return []; }
+    try{
+        var raw = localStorage.getItem('signalHistory');
+        if(!raw) return [];
+        return JSON.parse(raw);
+    } catch(e){
+        log('Error reading localStorage: ' + e.message, 'err');
+        return [];
+    }
 }
 
 function getTradePnL(s){
