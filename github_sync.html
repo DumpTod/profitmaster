@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>StrikeTrail — GitHub CSV Sync</title>
+<style>
+  body { font-family: sans-serif; background: #f0f2f5; padding: 30px; max-width: 500px; margin: auto; }
+  h2 { color: #0f1f3d; }
+  input { width: 100%; padding: 9px; margin: 8px 0 16px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+  button { padding: 10px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #1d4ed8; }
+  .log { margin-top: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; font-size: 12px; color: #4a5568; min-height: 80px; white-space: pre-wrap; }
+  .green { color: #16a34a; font-weight: 600; }
+  .red { color: #dc2626; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h2>📤 GitHub CSV Sync</h2>
+<p style="font-size:13px;color:#666;">Reads your trades from localStorage and saves them to <b>data.csv</b> in your GitHub repo automatically.</p>
+
+<label style="font-size:13px;font-weight:600;">GitHub Personal Access Token</label>
+<input type="password" id="pat" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" />
+
+<button onclick="syncNow()">🔄 Sync Now</button>
+<button onclick="startAuto()" style="background:#16a34a;margin-left:8px;">▶ Auto Sync (every 2 min)</button>
+<button onclick="stopAuto()" style="background:#dc2626;margin-left:8px;">⏹ Stop</button>
+
+<div class="log" id="log">Ready. Enter your token and click Sync Now.</div>
+
+<script>
+var GH_OWNER  = 'DumpTod';
+var GH_REPO   = 'profitmaster';
+var GH_PATH   = 'data.csv';
+var GH_BRANCH = 'main';
+var autoTimer = null;
+
+// Load saved token
+window.onload = function(){
+  var saved = localStorage.getItem('gh_pat');
+  if(saved) document.getElementById('pat').value = saved;
+};
+
+function log(msg, cls){
+  var d = document.getElementById('log');
+  var t = new Date().toLocaleTimeString('en-IN');
+  d.innerHTML += '\n[' + t + '] <span class="'+(cls||'')+'">' + msg + '</span>';
+  d.scrollTop = d.scrollHeight;
+}
+
+function getTrades(){
+  try {
+    var raw = localStorage.getItem('signalHistory');
+    if(!raw) return [];
+    return JSON.parse(raw).filter(function(s){ 
+      return s.scanner_type === 'atr_trailing'; 
+    });
+  } catch(e){ return []; }
+}
+
+function getTradePnL(s){
+  if(!s.exit_price || isNaN(s.exit_price)) return '';
+  var ep = parseFloat(s.exit_price), en = parseFloat(s.entry), ls = s.lot_size || 1;
+  var pnl = s.direction === 'BUY-LONG' ? (ep - en) * ls : (en - ep) * ls;
+  return Math.round(pnl);
+}
+
+function buildCSV(trades){
+  var header = 'Date,Symbol,Direction,Grade,Score,Entry,SL,T1,T2,RR,Confidence,Outcome,Exit,PnL';
+  var rows = [header];
+  trades.forEach(function(s){
+    rows.push([
+      s.scan_date, s.symbol, s.direction, s.grade, s.grade_score,
+      s.entry, s.sl, s.target_1||'', s.target_2||s.target||'',
+      s.risk_reward||'', Math.round((s.confidence||0)*100)+'%',
+      s.outcome, s.exit_price||'', getTradePnL(s)
+    ].join(','));
+  });
+  return rows.join('\n');
+}
+
+async function syncNow(){
+  var token = document.getElementById('pat').value.trim();
+  if(!token){ log('Please enter your GitHub token.', 'red'); return; }
+  localStorage.setItem('gh_pat', token);
+
+  var trades = getTrades();
+  if(trades.length === 0){ log('No trades found in localStorage.', 'red'); return; }
+  log('Found ' + trades.length + ' trades. Pushing to GitHub...');
+
+  var csvContent = buildCSV(trades);
+  var base64 = btoa(unescape(encodeURIComponent(csvContent)));
+  var apiUrl = 'https://api.github.com/repos/' + GH_OWNER + '/' + GH_REPO + '/contents/' + GH_PATH;
+
+  try {
+    // Get existing file SHA
+    var sha = null;
+    var getResp = await fetch(apiUrl + '?ref=' + GH_BRANCH, {
+      headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json' }
+    });
+    if(getResp.ok){ sha = (await getResp.json()).sha; }
+
+    var body = { message: 'sync: data.csv ' + new Date().toISOString(), content: base64, branch: GH_BRANCH };
+    if(sha) body.sha = sha;
+
+    var putResp = await fetch(apiUrl, {
+      method: 'PUT',
+      headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if(putResp.ok){
+      log('✓ data.csv updated in GitHub (' + trades.length + ' trades)', 'green');
+    } else {
+      var err = await putResp.json();
+      log('✗ GitHub error: ' + (err.message || putResp.status), 'red');
+    }
+  } catch(e){
+    log('✗ Network error: ' + e.message, 'red');
+  }
+}
+
+function startAuto(){
+  if(autoTimer){ log('Auto sync already running.'); return; }
+  log('▶ Auto sync started — every 2 minutes.', 'green');
+  syncNow();
+  autoTimer = setInterval(syncNow, 2 * 60 * 1000);
+}
+
+function stopAuto(){
+  if(autoTimer){ clearInterval(autoTimer); autoTimer = null; log('⏹ Auto sync stopped.'); }
+}
+</script>
+</body>
+</html>
