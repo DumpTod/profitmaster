@@ -52,7 +52,12 @@ function getTrades(){
     try{
         var raw = localStorage.getItem('signalHistory');
         if(!raw) return [];
-        return JSON.parse(raw);
+        var all = JSON.parse(raw);
+        // Filter only NIFTY and BANKNIFTY trades
+        return all.filter(function(s){
+            return s.symbol === 'NIFTY' || s.symbol === 'BANKNIFTY' ||
+                   s.symbol === 'NIFTY50' || s.scanner_type === 'atr_trailing';
+        });
     } catch(e){
         log('Error reading localStorage: ' + e.message, 'err');
         return [];
